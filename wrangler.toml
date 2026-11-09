@@ -1,0 +1,11 @@
+name = "club-schedule"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+rules = [{ type = "Text", globs = ["**/client.js"], fallthrough = false }]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "club-schedule"
+database_id = "REPLACE_WITH_D1_ID"
