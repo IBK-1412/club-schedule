@@ -1,0 +1,9 @@
+{
+  "id": "word-to-pdf",
+  "name": "Word to PDF",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.7",
+  "description": "vault に Word ファイル（.docx/.doc）が追加されたら PDF に変換し、ノート内のリンクも PDF に置き換えます。変換は PC（Word または LibreOffice）で行い、iPad で入れたファイルは同期後に PC が変換します。",
+  "author": "ibuki",
+  "isDesktopOnly": false
+}
