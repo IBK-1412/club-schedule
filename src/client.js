@@ -92,7 +92,8 @@ async function renderPoll(id, justCreated) {
   catch (e) { app.innerHTML = '<div class="card center"><p>' + h(e.message) + '</p><a class="btn" href="/">新しく作る</a></div>'; return; }
   const toks = store.get('toks:' + id, {});
   const me = store.get('me:' + id, null);
-  const mine = me && toks[me] && poll.votes.find((v) => v.name === me);
+  if (me && !toks[me]) toks[me] = 'legacy'; // 更新前に回答した端末
+  const mine = me && poll.votes.find((v) => v.name === me);
   const savedName = store.get('myName', '');
   S = {
     poll, adminKey: poll.isAdmin ? adminKey : '', justCreated,
@@ -140,6 +141,8 @@ function drawVote() {
     return;
   }
   const toks = store.get('toks:' + p.id, {});
+  const legacyMe = store.get('me:' + p.id, null);
+  if (legacyMe && !toks[legacyMe]) toks[legacyMe] = 'legacy';
   // この端末で回答した名前（管理者は全員分）だけ編集できる
   const editable = p.votes.map((v) => v.name).filter((n) => n !== my.oldName && (S.adminKey || toks[n]));
   B.innerHTML = `
@@ -217,7 +220,9 @@ function drawVote() {
     try {
       const r = await api('/api/polls/' + p.id + '/votes', {
         name, oldName: my.oldName, answers: my.answers, comment: my.comment,
-        token: toks[my.oldName] || toks[name] || '', adminKey: S.adminKey || undefined,
+        token: [toks[my.oldName], toks[name]].find((t) => t && t !== 'legacy') || '',
+        claim: toks[my.oldName] === 'legacy' ? my.oldName : toks[name] === 'legacy' ? name : '',
+        adminKey: S.adminKey || undefined,
       });
       const t2 = store.get('toks:' + p.id, {});
       if (my.oldName && my.oldName !== name) delete t2[my.oldName];

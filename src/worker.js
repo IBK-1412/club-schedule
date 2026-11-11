@@ -136,20 +136,22 @@ async function putVote(id, request, env) {
   const token = clean(b.token, 40);
   const isAdmin = !!b.adminKey && b.adminKey === p.admin_key;
   // 本人（その回答を作った端末のトークン）か管理者だけが編集できる
-  const canEdit = (row) => isAdmin || row.token === '' || (!!token && row.token === token);
+  // token が空の行は更新前の回答。前の版で「自分の回答」として記録した端末（claim）だけ引き継げる
+  const claim = clean(b.claim, 20);
+  const canEdit = (row, n) => isAdmin || (!!token && row.token === token) || (row.token === '' && claim === n);
   const getRow = (n) => env.DB.prepare('SELECT token FROM votes WHERE poll_id = ? AND name = ?').bind(id, n).first();
 
   let keepToken = '';
   if (oldName) {
     const oldRow = await getRow(oldName);
     if (oldRow) {
-      if (!canEdit(oldRow)) return json({ error: '「' + oldName + '」の回答は、回答した端末からしか編集できません' }, 403);
+      if (!canEdit(oldRow, oldName)) return json({ error: '「' + oldName + '」の回答は、回答した端末からしか編集できません' }, 403);
       keepToken = oldRow.token;
     }
   }
   const sameRow = await getRow(name);
   if (sameRow && name !== oldName) {
-    if (!canEdit(sameRow)) return json({ error: '「' + name + '」はすでに回答があります。別の名前にしてください（自分の回答なら、回答した端末から編集してください）' }, 409);
+    if (!canEdit(sameRow, name)) return json({ error: '「' + name + '」はすでに回答があります。別の名前にしてください（自分の回答なら、回答した端末から編集してください）' }, 409);
     keepToken = keepToken || sameRow.token;
   }
   if (!sameRow) {
