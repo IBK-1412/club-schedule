@@ -8,4 +8,4 @@ rules = [{ type = "Text", globs = ["**/client.js"], fallthrough = false }]
 [[d1_databases]]
 binding = "DB"
 database_name = "club-schedule"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "3f0657d3-42c2-4cb8-8043-f4117df51e87"
