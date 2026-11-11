@@ -90,8 +90,9 @@ async function renderPoll(id, justCreated) {
   let poll;
   try { poll = await api('/api/polls/' + id + (adminKey ? '?admin=' + encodeURIComponent(adminKey) : '')); }
   catch (e) { app.innerHTML = '<div class="card center"><p>' + h(e.message) + '</p><a class="btn" href="/">新しく作る</a></div>'; return; }
+  const toks = store.get('toks:' + id, {});
   const me = store.get('me:' + id, null);
-  const mine = me && poll.votes.find((v) => v.name === me);
+  const mine = me && toks[me] && poll.votes.find((v) => v.name === me);
   const savedName = store.get('myName', '');
   S = {
     poll, adminKey: poll.isAdmin ? adminKey : '', justCreated,
@@ -138,13 +139,15 @@ function drawVote() {
     B.querySelector('[data-go]').onclick = () => { S.tab = 'res'; draw(); };
     return;
   }
-  const others = p.votes.map((v) => v.name).filter((n) => n !== my.oldName);
+  const toks = store.get('toks:' + p.id, {});
+  // この端末で回答した名前（管理者は全員分）だけ編集できる
+  const editable = p.votes.map((v) => v.name).filter((n) => n !== my.oldName && (S.adminKey || toks[n]));
   B.innerHTML = `
   <div class="card">
     <label class="f" for="nm" style="margin-top:0">名前</label>
     <input type="text" id="nm" maxlength="20" placeholder="例：山田" value="${h(my.name)}" autocomplete="nickname">
-    ${my.oldName ? '<p class="muted" style="margin:6px 0 0">「' + h(my.oldName) + '」の回答を編集中です。</p>' : ''}
-    ${others.length ? '<p class="muted" style="margin:6px 0 0">回答済み：' + others.map((n) => '<a href="#" data-edit="' + h(n) + '">' + h(n) + '</a>').join('、') + '<br>（自分の名前をタップすると、その回答を編集できます）</p>' : ''}
+    ${my.oldName ? '<p class="muted" style="margin:6px 0 0">「' + h(my.oldName) + '」の回答を編集中です。<a href="#" id="fresh">別の人として新しく回答する</a></p>' : ''}
+    ${editable.length ? '<p class="muted" style="margin:6px 0 0">' + (S.adminKey ? '回答を編集（管理者）：' : 'この端末で回答した名前：') + editable.map((n) => '<a href="#" data-edit="' + h(n) + '">' + h(n) + '</a>').join('、') + '<br>（タップすると、その回答を編集できます）</p>' : ''}
   </div>
   <div class="card">
     <h2>空いている時間をタップ</h2>
@@ -196,16 +199,30 @@ function drawVote() {
     S.my = { name: v.name, oldName: v.name, answers: Object.assign({}, v.answers), comment: v.comment };
     drawVote(); toast('「' + v.name + '」の回答を読み込みました');
   });
+  const fresh = $('#fresh');
+  if (fresh) fresh.onclick = (e) => {
+    e.preventDefault();
+    S.my = { name: '', oldName: '', answers: {}, comment: '' };
+    drawVote();
+  };
   $('#save').onclick = async () => {
     const name = my.name.trim();
     if (!name) { toast('名前を入れてください'); $('#nm').focus(); return; }
+    const canOverwrite = S.adminKey || toks[name];
     if (name !== my.oldName && p.votes.some((v) => v.name === name)) {
-      if (!confirm('「' + name + '」はすでに回答があります。上書きしますか？')) return;
+      if (!canOverwrite) { toast('「' + name + '」はすでに回答があります。別の名前にしてください'); $('#nm').focus(); return; }
+      if (!confirm('「' + name + '」の回答を上書きしますか？')) return;
     }
     $('#save').disabled = true;
     try {
-      await api('/api/polls/' + p.id + '/votes', { name, oldName: my.oldName, answers: my.answers, comment: my.comment });
-      store.set('me:' + p.id, name); store.set('myName', name);
+      const r = await api('/api/polls/' + p.id + '/votes', {
+        name, oldName: my.oldName, answers: my.answers, comment: my.comment,
+        token: toks[my.oldName] || toks[name] || '', adminKey: S.adminKey || undefined,
+      });
+      const t2 = store.get('toks:' + p.id, {});
+      if (my.oldName && my.oldName !== name) delete t2[my.oldName];
+      if (r.token) { t2[name] = r.token; store.set('me:' + p.id, name); store.set('myName', name); }
+      store.set('toks:' + p.id, t2);
       toast('回答を保存しました');
       S.tab = 'res';
       await renderPoll(p.id);

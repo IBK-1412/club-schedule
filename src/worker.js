@@ -115,7 +115,17 @@ async function getPoll(id, env, adminKey) {
   });
 }
 
+// 既存DB向け: votes.token 列がなければ追加（初回だけ）
+let migrated = null;
+function migrate(env) {
+  if (!migrated) {
+    migrated = env.DB.prepare("ALTER TABLE votes ADD COLUMN token TEXT NOT NULL DEFAULT ''").run().catch(() => {});
+  }
+  return migrated;
+}
+
 async function putVote(id, request, env) {
+  await migrate(env);
   const p = await loadPoll(id, env);
   if (!p) return json({ error: 'この投票は見つかりません' }, 404);
   if (p.closed) return json({ error: 'この投票は締め切られています' }, 403);
@@ -123,27 +133,49 @@ async function putVote(id, request, env) {
   const name = clean(b.name, 20);
   if (!name) return json({ error: '名前を入れてください' }, 400);
   const oldName = clean(b.oldName, 20);
+  const token = clean(b.token, 40);
+  const isAdmin = !!b.adminKey && b.adminKey === p.admin_key;
+  // 本人（その回答を作った端末のトークン）か管理者だけが編集できる
+  const canEdit = (row) => isAdmin || row.token === '' || (!!token && row.token === token);
+  const getRow = (n) => env.DB.prepare('SELECT token FROM votes WHERE poll_id = ? AND name = ?').bind(id, n).first();
+
+  let keepToken = '';
+  if (oldName) {
+    const oldRow = await getRow(oldName);
+    if (oldRow) {
+      if (!canEdit(oldRow)) return json({ error: '「' + oldName + '」の回答は、回答した端末からしか編集できません' }, 403);
+      keepToken = oldRow.token;
+    }
+  }
+  const sameRow = await getRow(name);
+  if (sameRow && name !== oldName) {
+    if (!canEdit(sameRow)) return json({ error: '「' + name + '」はすでに回答があります。別の名前にしてください（自分の回答なら、回答した端末から編集してください）' }, 409);
+    keepToken = keepToken || sameRow.token;
+  }
+  if (!sameRow) {
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM votes WHERE poll_id = ?').bind(id).first();
+    if (count.n >= 200) return json({ error: '回答数の上限（200人）に達しています' }, 400);
+  }
   const answers = {};
   for (const d of p.days) for (const per of p.periods) {
     const k = d + '-' + per;
     const v = Number(b.answers && b.answers[k]);
     answers[k] = v === 2 || v === 1 ? v : 0;
   }
-  const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM votes WHERE poll_id = ?').bind(id).first();
-  const exists = await env.DB.prepare('SELECT 1 FROM votes WHERE poll_id = ? AND name = ?').bind(id, name).first();
-  if (!exists && count.n >= 200) return json({ error: '回答数の上限（200人）に達しています' }, 400);
+  const newToken = keepToken || rid(20);
   const stmts = [];
   if (oldName && oldName !== name) {
     stmts.push(env.DB.prepare('DELETE FROM votes WHERE poll_id = ? AND name = ?').bind(id, oldName));
   }
   stmts.push(
     env.DB.prepare(
-      `INSERT INTO votes (poll_id, name, answers, comment, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(poll_id, name) DO UPDATE SET answers = excluded.answers, comment = excluded.comment, updated_at = excluded.updated_at`
-    ).bind(id, name, JSON.stringify(answers), clean(b.comment, 200), Date.now())
+      `INSERT INTO votes (poll_id, name, answers, comment, updated_at, token) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(poll_id, name) DO UPDATE SET answers = excluded.answers, comment = excluded.comment, updated_at = excluded.updated_at, token = excluded.token`
+    ).bind(id, name, JSON.stringify(answers), clean(b.comment, 200), Date.now(), newToken)
   );
   await env.DB.batch(stmts);
-  return json({ ok: true });
+  // 管理者が他人の回答を直したときは、その人のトークンを管理者の端末に渡さない
+  return json({ ok: true, token: isAdmin && keepToken && keepToken !== token ? '' : newToken });
 }
 
 async function admin(id, request, env) {

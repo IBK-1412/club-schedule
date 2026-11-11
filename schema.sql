@@ -15,5 +15,6 @@ CREATE TABLE IF NOT EXISTS votes (
   answers TEXT NOT NULL,
   comment TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL,
+  token TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (poll_id, name)
 );
